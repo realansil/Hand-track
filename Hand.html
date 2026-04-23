@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>✦ ARCANE HAND WEAVER ✦ | Supreme Gesture Sorcery</title>
+    
+    <!-- MediaPipe Hands -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    
+    <!-- Three.js + Postprocessing -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.128.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.128.0/examples/jsm/"
+            }
+        }
+    </script>
+    
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; }
+        body { overflow: hidden; background: #000; font-family: 'Segoe UI', 'Inter', monospace; }
+        
+        /* Hidden video feed (required for MediaPipe) */
+        #input-video {
+            position: fixed; top: 0; left: 0;
+            width: 100%; height: 100%;
+            object-fit: cover; transform: scaleX(-1);
+            opacity: 0; pointer-events: none; z-index: -1;
+        }
+        
+        /* Three.js canvas */
+        #three-canvas {
+            position: fixed; inset: 0;
+            width: 100%; height: 100%;
+            display: block; z-index: 1;
+        }
+        
+        /* UI overlays */
+        .hud {
+            position: fixed; top: 20px; left: 20px;
+            background: rgba(0, 0, 0, 0.55); backdrop-filter: blur(12px);
+            border-radius: 28px; border-left: 3px solid #ff66cc;
+            padding: 14px 20px; z-index: 20;
+            font-family: monospace; pointer-events: none;
+            color: #f0f0ff; text-shadow: 0 0 5px #ff66cc;
+            box-shadow: 0 0 30px rgba(0,0,0,0.5);
+        }
+        .hud p { margin: 4px 0; font-size: 0.85rem; letter-spacing: 2px; }
+        .hud span { color: #ffaaee; font-weight: bold; font-size: 1.1rem; }
+        
+        .gesture-panel {
+            position: fixed; bottom: 20px; right: 20px;
+            background: rgba(0,0,0,0.6); backdrop-filter: blur(10px);
+            border-radius: 20px; padding: 10px 18px;
+            border-right: 2px solid #44ffaa;
+            text-align: right; font-family: monospace; z-index: 20;
+            color: #aaffdd; font-size: 0.7rem; pointer-events: none;
+        }
+        .gesture-panel .gesture-name {
+            font-size: 1.2rem; font-weight: bold; color: #ffdd88;
+        }
+        
+        .charge-bar {
+            position: fixed; bottom: 80px; left: 50%;
+            transform: translateX(-50%);
+            width: 180px; height: 4px;
+            background: rgba(255,255,255,0.2); border-radius: 4px;
+            overflow: hidden; z-index: 20; opacity: 0;
+            transition: opacity 0.2s;
+        }
+        .charge-fill {
+            width: 0%; height: 100%;
+            background: linear-gradient(90deg, #ff88cc, #aa88ff);
+            box-shadow: 0 0 12px #ff88ff;
+            transition: width 0.05s linear;
+        }
+        
+        #start-overlay {
+            position: fixed; inset: 0;
+            background: radial-gradient(circle at center, #0a0a2a, #000000);
+            z-index: 100; display: flex;
+            flex-direction: column; justify-content: center; align-items: center;
+            backdrop-filter: blur(8px); transition: opacity 0.8s ease;
+            font-family: monospace;
+        }
+        #start-btn {
+            background: linear-gradient(135deg, #aa44ff, #ff44aa);
+            border: none; color: white; padding: 14px 42px;
+            font-size: 1.4rem; border-radius: 60px; cursor: pointer;
+            font-weight: bold; letter-spacing: 4px; box-shadow: 0 0 20px #ff44ff;
+            transition: 0.2s; margin-top: 30px;
+        }
+        #start-btn:hover { transform: scale(1.03); box-shadow: 0 0 40px #ff88ff; }
+        .hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+        
+        @media (max-width: 700px) {
+            .hud { top: 10px; left: 10px; padding: 8px 12px; }
+            .hud p { font-size: 0.6rem; }
+            .gesture-panel { bottom: 10px; right: 10px; padding: 6px 12px; }
+        }
+    </style>
+</head>
+<body>
+    <video id="input-video" autoplay playsinline muted></video>
+    <canvas id="three-canvas"></canvas>
+    
+    <div class="hud" id="hud">
+        <p>🌀 HANDS: <span id="hand-count">0</span> &nbsp;|&nbsp; FPS: <span id="fps-val">0</span></p>
+        <p>✨ GESTURE: <span id="gesture-name">—</span></p>
+        <p>🎵 ARCANE HUM: <span id="hum-status">ACTIVE</span></p>
+    </div>
+    <div class="gesture-panel" id="gesture-panel">
+        <div>✧ WEAVE ✧</div>
+        <div class="gesture-name" id="big-gesture">—</div>
+        <div id="gesture-desc">🟡 FIST → EARTH | 🟢 OPEN → AIR | 🔴 PINCH → FIRE | 💧 PEACE → WATER</div>
+    </div>
+    <div class="charge-bar" id="charge-bar"><div class="charge-fill" id="charge-fill"></div></div>
+    
+    <div id="start-overlay">
+        <h1 style="color:#ccddff; letter-spacing:6px;">✦ ARCANE HAND WEAVER ✦</h1>
+        <p style="color:#aaa; margin:20px;">cast spells with your fingers | mediapipe hands | 3D particle sorcery</p>
+        <button id="start-btn">⚡ AWAKEN ⚡</button>
+        <p style="margin-top:40px; font-size:12px;">✧ Fist = Earth | Open Palm = Air | Pinch = Fire | Peace = Water | Spread = Arcane ✧</p>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+        import { FilmPass } from 'three/addons/postprocessing/FilmPass.js';
+        
+        // ========== GLOBALS ==========
+        const videoEl = document.getElementById('input-video');
+        let scene, camera, renderer, composer, bloomPass;
+        let mainGroup;
+        let handParticles = new Map(); // handId -> { pointsGroup, trailPoints, lastPositions }
+        let currentLandmarks = [];     // list of hand landmarks (array of arrays)
+        let handCount = 0;
+        
+        // Gesture state
+        let currentGesture = "NEUTRAL";
+        let gestureStrength = 0.5;
+        let leftHandGesture = null, rightHandGesture = null;
+        let chargeLevel = 0;        // for combo charging
+        let chargeActive = false;
+        
+        // Audio
+        let audioCtx = null;
+        let masterGain, filterNode, oscLeft, oscRight, lfo;
+        let isAudioMuted = false;
+        let audioAllowed = false;
+        
+        // Visual extras
+        let starField;
+        let ambientParticles = [];
+        let spellRings = [];         // 2D rings (canvas)
+        let inkSplatters = [];        // 2D ink drops
+        
+        // Performance
+        let frameCount = 0, lastFpsTime = performance.now(), fps = 60;
+        
+        // Theme colors based on dominant gesture
+        const themeColors = {
+            NEUTRAL: { primary: 0x88aaff, secondary: 0xff88cc, bloom: 0.8, bg: 0x050510 },
+            EARTH:   { primary: 0xdd8844, secondary: 0xaa6644, bloom: 1.2, bg: 0x221100 },
+            AIR:     { primary: 0x88ddff, secondary: 0xaaffff, bloom: 1.5, bg: 0x002233 },
+            FIRE:    { primary: 0xff6644, secondary: 0xffaa44, bloom: 2.0, bg: 0x331100 },
+            WATER:   { primary: 0x44aaff, secondary: 0x88ccff, bloom: 1.1, bg: 0x001133 },
+            ARCANE:  { primary: 0xcc88ff, secondary: 0xff88ff, bloom: 2.5, bg: 0x1a0a2a }
+        };
+        let currentTheme = "NEUTRAL";
+        
+        // ========== THREE.JS INIT ==========
+        function init3D() {
+            const canvas = document.getElementById('three-canvas');
+            renderer = new THREE.WebGLRenderer({ canvas, alpha: false, antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.toneMapping = THREE.ReinhardToneMapping;
+            
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x050510);
+            scene.fog = new THREE.FogExp2(0x050510, 0.002);
+            
+            camera = new THREE.PerspectiveCamera(50, window.innerWidth/window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 0, 4.2);
+            camera.lookAt(0, 0, 0);
+            
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0x222222);
+            scene.add(ambientLight);
+            const mainLight = new THREE.DirectionalLight(0xffffff, 1);
+            mainLight.position.set(1, 2, 3);
+            scene.add(mainLight);
+            const backLight = new THREE.PointLight(0x8866ff, 0.5);
+            backLight.position.set(-1, 1, -2);
+            scene.add(backLight);
+            
+            // Starfield background
+            const starGeo = new THREE.BufferGeometry();
+            const starCount = 1500;
+            const starPos = [];
+            for (let i = 0; i < starCount; i++) {
+                starPos.push((Math.random() - 0.5) * 400);
+                starPos.push((Math.random() - 0.5) * 200);
+                starPos.push((Math.random() - 0.5) * 100 - 50);
+            }
+            starGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(starPos), 3));
+            const starMat = new THREE.PointsMaterial({ color: 0xaaccff, size: 0.12, transparent: true, opacity: 0.6 });
+            starField = new THREE.Points(starGeo, starMat);
+            scene.add(starField);
+            
+            // Central orb
+            const orbGeo = new THREE.SphereGeometry(0.32, 64, 64);
+            const orbMat = new THREE.MeshStandardMaterial({ color: 0xff88aa, emissive: 0x331133, emissiveIntensity: 0.6 });
+            const centerOrb = new THREE.Mesh(orbGeo, orbMat);
+            scene.add(centerOrb);
+            
+            // Postprocessing
+            const renderScene = new RenderPass(scene, camera);
+            composer = new EffectComposer(renderer);
+            composer.addPass(renderScene);
+            bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.0, 0.4, 0.2);
+            bloomPass.threshold = 0.1;
+            bloomPass.strength = 0.9;
+            bloomPass.radius = 0.5;
+            composer.addPass(bloomPass);
+            
+            // Film grain pass for mysticism
+            const filmPass = new FilmPass(0.25, 0.5, 2048, false);
+            filmPass.renderToScreen = true;
+            composer.addPass(filmPass);
+            
+            mainGroup = new THREE.Group();
+            scene.add(mainGroup);
+        }
+        
+        // Create particle system for each hand (glowing orbs + trail)
+        function createHandVisual(handId) {
+            const group = new THREE.Group();
+            const particleCount = 800;
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(particleCount * 3);
+            const colors = new Float32Array(particleCount * 3);
+            for (let i = 0; i < particleCount; i++) {
+                positions[i*3] = (Math.random() - 0.5) * 0.3;
+                positions[i*3+1] = (Math.random() - 0.5) * 0.3;
+                positions[i*3+2] = (Math.random() - 0.5) * 0.2;
+                const col = themeColors[currentTheme].primary;
+                colors[i*3] = ((col >> 16) & 0xff) / 255;
+                colors[i*3+1] = ((col >> 8) & 0xff) / 255;
+                colors[i*3+2] = (col & 0xff) / 255;
+            }
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            const material = new THREE.PointsMaterial({ size: 0.022, vertexColors: true, blending: THREE.AdditiveBlending });
+            const points = new THREE.Points(geometry, material);
+            group.add(points);
+            
+            // Trail stored as array of recent positions
+            const trailPositions = [];
+            for (let i = 0; i < 30; i++) trailPositions.push(new THREE.Vector3());
+            
+            group.userData = { points, trailPositions, trailIdx: 0, particleCount, geometry, colorsArray: colors };
+            return group;
+        }
+        
+        function updateHandVisual(handGroup, landmarks, handId, gestureType, strength) {
+            if (!handGroup || !landmarks) return;
+            const palm = landmarks[0];
+            // Map normalized coordinates to 3D space (X: -2.2 to 2.2, Y: -1.5 to 1.5, Z from depth)
+            const x = (palm.x - 0.5) * 4.2;
+            const y = (0.5 - palm.y) * 2.8;
+            const z = palm.z * 0.6 - 0.2;
+            handGroup.position.set(x, y, z);
+            
+            // Update particle colors based on current theme and gesture
+            const colPrimary = themeColors[currentTheme].primary;
+            const r = ((colPrimary >> 16) & 0xff) / 255;
+            const g = ((colPrimary >> 8) & 0xff) / 255;
+            const b = (colPrimary & 0xff) / 255;
+            const colorsArr = handGroup.userData.colorsArray;
+            for (let i = 0; i < handGroup.userData.particleCount; i++) {
+                colorsArr[i*3] = r * (0.5 + Math.sin(Date.now() * 0.005 + i) * 0.3);
+                colorsArr[i*3+1] = g * (0.6 + Math.cos(i * 0.02) * 0.3);
+                colorsArr[i*3+2] = b * (0.7 + Math.sin(i * 0.03) * 0.3);
+            }
+            handGroup.userData.points.geometry.attributes.color.needsUpdate = true;
+            
+            // Update trail
+            const trail = handGroup.userData.trailPositions;
+            const idx = handGroup.userData.trailIdx;
+            trail[idx].set(x, y, z);
+            handGroup.userData.trailIdx = (idx + 1) % trail.length;
+            
+            // Draw trail as line segments (simple)
+            const trailGeo = new THREE.BufferGeometry();
+            const vertices = [];
+            for (let i = 0; i < trail.length; i++) {
+                const p = trail[(idx + i) % trail.length];
+                if (p.length() > 0.01) {
+                    vertices.push(p.x, p.y, p.z);
+                }
+            }
+            if (vertices.length > 2) {
+                if (handGroup.userData.trailLine) handGroup.remove(handGroup.userData.trailLine);
+                const trailGeoObj = new THREE.BufferGeometry();
+                trailGeoObj.setAttribute('position', new THREE.BufferAttribute(new Float32Array(vertices), 3));
+                const trailMat = new THREE.LineBasicMaterial({ color: colPrimary, transparent: true, opacity: 0.4 });
+                const trailLine = new THREE.Line(trailGeoObj, trailMat);
+                handGroup.add(trailLine);
+                handGroup.userData.trailLine = trailLine;
+            }
+            
+            // Scale effect based on gesture strength
+            const scale = 0.8 + strength * 0.6;
+            handGroup.userData.points.scale.set(scale, scale, scale);
+        }
+        
+        // ========== ADVANCED GESTURE RECOGNITION ==========
+        function countExtendedFingers(landmarks) {
+            // Based on finger tip vs PIP y-coordinate (normalized)
+            const tips = [8, 12, 16, 20];
+            const pips = [6, 10, 14, 18];
+            let count = 0;
+            for (let i = 0; i < tips.length; i++) {
+                if (landmarks[tips[i]].y < landmarks[pips[i]].y - 0.02) count++;
+            }
+            // Thumb heuristic: x distance from IP joint (3) to tip (4)
+            if (Math.abs(landmarks[4].x - landmarks[3].x) > 0.035) count++;
+            return count;
+        }
+        
+        function detectGesture(landmarks) {
+            if (!landmarks) return "NEUTRAL";
+            const extended = countExtendedFingers(landmarks);
+            // Pinch: distance thumb-index < 0.045
+            const pinchDist = Math.hypot(landmarks[4].x - landmarks[8].x, landmarks[4].y - landmarks[8].y);
+            const isPinch = pinchDist < 0.045;
+            // Peace: extension of index and middle only (8 & 12), others folded
+            const peace = (landmarks[8].y < landmarks[6].y - 0.025 && landmarks[12].y < landmarks[10].y - 0.025 &&
+                           landmarks[16].y > landmarks[14].y - 0.01 && landmarks[20].y > landmarks[18].y - 0.01);
+            // Open palm: 5 fingers extended
+            const openPalm = extended >= 4;
+            // Fist: 0 fingers extended
+            const fist = extended === 0;
+            // Arcane: all fingers spread (extended=5 + thumb extra)
+            const arcane = extended >= 5;
+            
+            if (isPinch) return "FIRE";
+            if (peace) return "WATER";
+            if (openPalm) return "AIR";
+            if (fist) return "EARTH";
+            if (arcane) return "ARCANE";
+            return "NEUTRAL";
+        }
+        
+        // ========== SOUND ENGINE ==========
+        async function initAudio() {
+            if (audioCtx) return;
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            masterGain = audioCtx.createGain();
+            masterGain.gain.value = 0.2;
+            filterNode = audioCtx.createBiquadFilter();
+            filterNode.type = "lowpass";
+            filterNode.frequency.value = 800;
+            filterNode.Q.value = 4;
+            
+            oscLeft = audioCtx.createOscillator();
+            oscLeft.type = "sine";
+            oscLeft.frequency.value = 120;
+            oscRight = audioCtx.createOscillator();
+            oscRight.type = "triangle";
+            oscRight.frequency.value = 240;
+            
+            lfo = audioCtx.createOscillator();
+            lfo.frequency.value = 1.8;
+            const lfoGain = audioCtx.createGain();
+            lfoGain.gain.value = 40;
+            lfo.connect(lfoGain);
+            lfoGain.connect(oscLeft.frequency);
+            
+            oscLeft.connect(filterNode);
+            oscRight.connect(filterNode);
+            filterNode.connect(masterGain);
+            masterGain.connect(audioCtx.destination);
+            
+            oscLeft.start();
+            oscRight.start();
+            lfo.start();
+            audioAllowed = true;
+        }
+        
+        function updateAudioFromGestures(gesture, strength, handDist = 0.5) {
+            if (!audioCtx || !audioAllowed || isAudioMuted) return;
+            let targetFreq = 120;
+            let targetFilter = 800;
+            let targetGain = 0.12;
+            
+            switch(gesture) {
+                case "EARTH": targetFreq = 80; targetFilter = 500; targetGain = 0.2; break;
+                case "AIR":   targetFreq = 360; targetFilter = 2000; targetGain = 0.18; break;
+                case "FIRE":  targetFreq = 520; targetFilter = 1500; targetGain = 0.22; break;
+                case "WATER": targetFreq = 260; targetFilter = 1200; targetGain = 0.16; break;
+                case "ARCANE":targetFreq = 720; targetFilter = 2800; targetGain = 0.28; break;
+                default: targetFreq = 150; targetFilter = 900; targetGain = 0.1;
+            }
+            // modulate by hand distance (closer hands = higher pitch)
+            targetFreq += (1 - handDist) * 180;
+            targetFilter += (1 - handDist) * 500;
+            
+            oscLeft.frequency.setTargetAtTime(targetFreq, audioCtx.currentTime, 0.07);
+            oscRight.frequency.setTargetAtTime(targetFreq * 1.5, audioCtx.currentTime, 0.07);
+            filterNode.frequency.setTargetAtTime(targetFilter, audioCtx.currentTime, 0.05);
+            masterGain.gain.setTargetAtTime(targetGain + gestureStrength * 0.1, audioCtx.currentTime, 0.05);
+        }
+        
+        // ========== VISUAL EFFECTS (2D CANVAS) ==========
+        const fxCanvas = document.createElement('canvas');
+        fxCanvas.style.position = 'fixed'; fxCanvas.style.inset = '0'; fxCanvas.style.pointerEvents = 'none';
+        fxCanvas.style.zIndex = '10'; fxCanvas.style.mixBlendMode = 'screen';
+        document.body.appendChild(fxCanvas);
+        const fxCtx = fxCanvas.getContext('2d');
+        
+        function resizeFX() { fxCanvas.width = window.innerWidth; fxCanvas.height = window.innerHeight; }
+        window.addEventListener('resize', resizeFX);
+        resizeFX();
+        
+        function addSpellRing(x, y, color, size = 40) {
+            spellRings.push({ x, y, radius: 8, maxRadius: size + 40, alpha: 0.9, color, life: 1.0 });
+        }
+        function addInkSplat(x, y, intensity, colorHex) {
+            for (let i = 0; i < intensity * 3; i++) {
+                inkSplatters.push({
+                    x: x + (Math.random() - 0.5) * intensity * 35,
+                    y: y + (Math.random() - 0.5) * intensity * 35,
+                    radius: 8 + Math.random() * 25,
+                    alpha: 0.5, decay: 0.008 + Math.random() * 0.01, color: colorHex
+                });
+            }
+        }
+        
+        function update2DEffects() {
+            fxCtx.clearRect(0, 0, fxCanvas.width, fxCanvas.height);
+            // Update rings
+            for (let i = spellRings.length-1; i >= 0; i--) {
+                const r = spellRings[i];
+                r.radius += (r.maxRadius - r.radius) * 0.12;
+                r.alpha *= 0.94;
+                r.life -= 0.02;
+                if (r.life <= 0 || r.alpha < 0.02) { spellRings.splice(i,1); continue; }
+                fxCtx.beginPath();
+                fxCtx.arc(r.x, r.y, r.radius, 0, Math.PI*2);
+                fxCtx.strokeStyle = r.color + Math.floor(r.alpha * 180).toString(16).padStart(2,'0');
+                fxCtx.lineWidth = 3;
+                fxCtx.stroke();
+            }
+            // Ink splats
+            for (let i = inkSplatters.length-1; i >= 0; i--) {
+                const s = inkSplatters[i];
+                s.radius *= 0.98;
+                s.alpha -= s.decay;
+                if (s.alpha <= 0.02) { inkSplatters.splice(i,1); continue; }
+                fxCtx.beginPath();
+                fxCtx.arc(s.x, s.y, s.radius, 0, Math.PI*2);
+                fxCtx.fillStyle = s.color + Math.floor(s.alpha * 70).toString(16).padStart(2,'0');
+                fxCtx.fill();
+            }
+        }
+        
+        // ========== MEDIAPIPE SETUP ==========
+        let handsInstance;
+        let cameraInstance;
+        
+        function onHandResults(results) {
+            currentLandmarks = results.multiHandLandmarks || [];
+            handCount = currentLandmarks.length;
+            document.getElementById('hand-count').innerText = handCount;
+            
+            // Remove extra hand visuals
+            const existingIds = Array.from(handParticles.keys());
+            for (let id of existingIds) {
+                if (id >= handCount) {
+                    mainGroup.remove(handParticles.get(id));
+                    handParticles.delete(id);
+                }
+            }
+            // Create/update visuals
+            for (let i = 0; i < handCount; i++) {
+                if (!handParticles.has(i)) {
+                    const visual = createHandVisual(i);
+                    mainGroup.add(visual);
+                    handParticles.set(i, visual);
+                }
+                const landmarks = currentLandmarks[i];
+                const gesture = detectGesture(landmarks);
+                const strength = Math.min(1, countExtendedFingers(landmarks) / 6);
+                if (i === 0) leftHandGesture = gesture;
+                else if (i === 1) rightHandGesture = gesture;
+                updateHandVisual(handParticles.get(i), landmarks, i, gesture, strength);
+            }
+            
+            // Determine overall gesture (priority: ARCANE > FIRE > AIR > WATER > EARTH > NEUTRAL)
+            let overall = "NEUTRAL";
+            let finalStrength = 0;
+            if (handCount >= 2 && leftHandGesture === rightHandGesture && leftHandGesture !== "NEUTRAL") overall = leftHandGesture;
+            else if (handCount === 1) overall = leftHandGesture || "NEUTRAL";
+            else if (handCount >= 2) overall = "ARCANE"; // Dual different gestures -> arcane synergy
+            finalStrength = handCount === 2 ? 1 : 0.6;
+            
+            // Charge combo: pinch + peace together? Not used now
+            if (overall === "ARCANE") chargeLevel = Math.min(1, chargeLevel + 0.02);
+            else chargeLevel = Math.max(0, chargeLevel - 0.01);
+            document.getElementById('charge-fill').style.width = (chargeLevel * 100) + '%';
+            document.getElementById('charge-bar').style.opacity = chargeLevel > 0.1 ? '1' : '0';
+            
+            if (overall !== currentGesture) {
+                currentGesture = overall;
+                document.getElementById('gesture-name').innerText = currentGesture;
+                document.getElementById('big-gesture').innerText = currentGesture;
+                // Trigger burst on new gesture
+                if (overall !== "NEUTRAL" && handCount > 0) {
+                    const palm = currentLandmarks[0][0];
+                    const sx = (1 - palm.x) * window.innerWidth;
+                    const sy = palm.y * window.innerHeight;
+                    addSpellRing(sx, sy, themeColors[overall].secondary.toString(16), 90);
+                    addInkSplat(sx, sy, 1.2, '#' + themeColors[overall].primary.toString(16).padStart(6,'0'));
+                }
+                // change theme
+                if (overall !== "NEUTRAL") currentTheme = overall;
+                else currentTheme = "NEUTRAL";
+                const theme = themeColors[currentTheme];
+                scene.background.setHex(theme.bg);
+                scene.fog.color.setHex(theme.bg);
+                bloomPass.strength = theme.bloom;
+                document.documentElement.style.setProperty('--accent', '#' + theme.primary.toString(16).padStart(6,'0'));
+            }
+            
+            // Compute average hand distance for audio
+            let handDist = 0.5;
+            if (handCount >= 2) {
+                const p1 = currentLandmarks[0][0];
+                const p2 = currentLandmarks[1][0];
+                const dx = p1.x - p2.x, dy = p1.y - p2.y;
+                handDist = Math.min(1, Math.hypot(dx, dy) * 1.5);
+            }
+            updateAudioFromGestures(currentGesture, finalStrength, handDist);
+            
+            // Random particle bursts
+            if (handCount > 0 && Math.random() < 0.15) {
+                const palm = currentLandmarks[0][0];
+                const sx = (1 - palm.x) * window.innerWidth;
+                const sy = palm.y * window.innerHeight;
+                addSpellRing(sx, sy, '#' + themeColors[currentGesture]?.primary.toString(16).padStart(6,'0') || '#88aaff', 45);
+            }
+        }
+        
+        function initMediaPipe() {
+            handsInstance = new Hands({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+            handsInstance.setOptions({
+                maxNumHands: 2, modelComplexity: 1,
+                minDetectionConfidence: 0.65, minTrackingConfidence: 0.65
+            });
+            handsInstance.onResults(onHandResults);
+            cameraInstance = new Camera(videoEl, {
+                onFrame: async () => { await handsInstance.send({ image: videoEl }); },
+                width: 1280, height: 720, facingMode: 'user'
+            });
+            cameraInstance.start();
+        }
+        
+        // ========== ANIMATION LOOP ==========
+        let lastTimestamp = 0;
+        function animate(time) {
+            requestAnimationFrame(animate);
+            const delta = Math.min(0.033, (time - lastTimestamp) / 1000);
+            lastTimestamp = time;
+            
+            frameCount++;
+            if (performance.now() - lastFpsTime > 1000) {
+                fps = frameCount;
+                document.getElementById('fps-val').innerText = fps;
+                frameCount = 0;
+                lastFpsTime = performance.now();
+            }
+            
+            // Update starfield
+            starField.rotation.y += 0.0008;
+            starField.rotation.x += 0.0003;
+            
+            // Update central orb pulsation
+            const orb = scene.children.find(c => c.geometry && c.geometry.type === 'SphereGeometry');
+            if (orb) {
+                const intensity = 0.5 + Math.sin(time * 0.008) * 0.3 + chargeLevel * 0.5;
+                orb.material.emissiveIntensity = intensity;
+            }
+            
+            // Update 2D effects
+            update2DEffects();
+            
+            // Update all hand groups position interpolation
+            for (let [id, group] of handParticles.entries()) {
+                if (group.userData.points) {
+                    group.userData.points.rotation.z += 0.02;
+                    group.userData.points.rotation.x += 0.01;
+                }
+            }
+            
+            composer.render();
+        }
+        
+        // ========== START EXPERIENCE ==========
+        function startApp() {
+            document.getElementById('start-overlay').classList.add('hidden');
+            init3D();
+            initAudio().catch(e => console.warn);
+            initMediaPipe();
+            animate(0);
+            // set interval to keep audio context alive
+            setInterval(() => { if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume(); }, 1000);
+        }
+        
+        document.getElementById('start-btn').addEventListener('click', startApp);
+        
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            composer.setSize(window.innerWidth, window.innerHeight);
+            resizeFX();
+        });
+        
+        // Small hack to ensure video loads
+        navigator.mediaDevices.getUserMedia({ video: true }).then(stream => {
+            if (!videoEl.srcObject) videoEl.srcObject = stream;
+        }).catch(e => console.warn);
+    </script>
+</body>
+</html>
